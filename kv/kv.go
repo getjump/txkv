@@ -3,6 +3,8 @@ package kv
 type State struct {
 	KV map[string]string
 
+	DeletedKeys map[string]bool
+
 	PrevState *State
 }
 
@@ -13,7 +15,7 @@ type KV struct {
 }
 
 func NewKV() *KV {
-	kv := &KV{State: &State{KV: make(map[string]string)}}
+	kv := &KV{State: &State{KV: make(map[string]string), DeletedKeys: make(map[string]bool)}}
 	return kv
 }
 
@@ -27,7 +29,7 @@ func (kv *KV) Begin() {
 
 	kv.LastTransaction = tx
 
-	state := &State{PrevState: kv.State, KV: make(map[string]string)}
+	state := &State{PrevState: kv.State, KV: make(map[string]string), DeletedKeys: make(map[string]bool)}
 	kv.State = state
 }
 
@@ -44,7 +46,13 @@ func (kv *KV) Count(needle string) int {
 
 	state := kv.State
 
+	isDeleted := make(map[string]bool)
+
 	for state != nil {
+		for key, _ := range state.DeletedKeys {
+			isDeleted[key] = true
+		}
+
 		for key, value := range state.KV {
 			if _, found := foundKeys[key]; found {
 				continue
@@ -53,7 +61,9 @@ func (kv *KV) Count(needle string) int {
 			foundKeys[key] = true
 
 			if value == needle {
-				result += 1
+				if _, ok := isDeleted[key]; !ok {
+					result += 1
+				}
 			}
 		}
 
@@ -66,9 +76,18 @@ func (kv *KV) Count(needle string) int {
 func (kv *KV) Get(lookupKey string) (string, bool) {
 	state := kv.State
 
+	isDeleted := false
+
 	for state != nil {
+		if _, ok := state.DeletedKeys[lookupKey]; ok {
+			isDeleted = true
+		}
+
 		for key, value := range state.KV {
-			if key == lookupKey {
+			if key == lookupKey && !isDeleted {
+				if _, ok := state.DeletedKeys[lookupKey]; ok {
+					return "", false
+				}
 				return value, true
 			}
 		}
@@ -135,6 +154,7 @@ type DeleteOperation struct {
 	Key string
 }
 func (op *DeleteOperation) Apply(kv *KV) {
+	kv.State.DeletedKeys[op.Key] = true
 	delete(kv.State.KV, op.Key)
 }
 
